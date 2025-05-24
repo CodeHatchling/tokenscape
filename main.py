@@ -654,7 +654,7 @@ def get_loading_text(frames, speed=10) -> str:
     return frames[i]
 
 
-def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, painter: QPainter):
+def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, painter: QPainter) -> bool:
     def expand_rect(_child_rect: Rect) -> Rect:
         # As the rect's "base" size grows, we will smoothly interpolate from the expanded size to the base size.
         # This is to prevent sudden jumps when the view is reparented, by restricting the influence of scaling
@@ -677,7 +677,7 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
     drawing_info = get_drawing_info(pixel_rect, cull_rect, node.token_str, min_height, painter)
     # If None is returned, it means the node is not visible, and we can skip drawing it.
     if drawing_info is None:
-        return
+        return False
     q_rect, label_string, label_size = drawing_info
 
     draw_background(painter, q_rect)
@@ -749,10 +749,9 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
                 child = child_data.get_child_node(i)
                 child_rect = pixel_rect.transform_rect(child.local_rect)
                 child_rect = expand_rect(child_rect)
-                draw_node(child, child_rect, cull_rect, min_height, painter)
-
-                if greatest_child_max_x < child_rect.max.x:
-                    greatest_child_max_x = child_rect.max.x
+                if draw_node(child, child_rect, cull_rect, min_height, painter):
+                    if greatest_child_max_x < child_rect.max.x:
+                        greatest_child_max_x = child_rect.max.x
             else:
                 best_child_node = child_data.get_child_node(highest_child_index)
 
@@ -760,10 +759,9 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
                 group_rect = range_to_local_rect(probability_start, probability_start + probability_accumulative)
                 group_rect = pixel_rect.transform_rect(group_rect)
                 group_rect = expand_rect(group_rect)
-                draw_node(best_child_node, group_rect, cull_rect, min_height, painter)
-
-                if greatest_child_max_x < group_rect.max.x:
-                    greatest_child_max_x = group_rect.max.x
+                if draw_node(best_child_node, group_rect, cull_rect, min_height, painter):
+                    if greatest_child_max_x < group_rect.max.x:
+                        greatest_child_max_x = group_rect.max.x
 
             probability_start = child_data.get_child_end(i)
             probability_accumulative = 0.0
@@ -806,6 +804,8 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
     )
     q_text_rect = rect_to_QRect(transform_rect_for_drawing(text_rect, cull_rect)).toRect()
     draw_text(painter, q_text_rect, label_string)
+
+    return True
 
 
 # @timed("draw_view")

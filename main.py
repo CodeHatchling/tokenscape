@@ -613,7 +613,7 @@ def draw_text(painter: QPainter, q_rect: QRect, label: str):
     painter.setOpacity(1)
     painter.setPen(QPen(drawing_style.standardPalette().mid().color(), 1))
     painter.drawText(q_rect,
-                     Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                     Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter,
                      label)
 
 
@@ -682,6 +682,8 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
 
     draw_background(painter, q_rect)
 
+    original_pixel_rect = pixel_rect
+
     # Retract the rect to make room for the label.
     # BUG: This causes sudden jumps when the view is reparented.
     pixel_rect = Rect(
@@ -699,6 +701,7 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
     visible_range = (start_range, end_range)
 
     child_data = node.get_children_data()
+    greatest_child_max_x = pixel_rect.min.x
 
     # If the children data is available, we can draw the children.
     if child_data is not None:
@@ -747,6 +750,9 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
                 child_rect = pixel_rect.transform_rect(child.local_rect)
                 child_rect = expand_rect(child_rect)
                 draw_node(child, child_rect, cull_rect, min_height, painter)
+
+                if greatest_child_max_x < child_rect.max.x:
+                    greatest_child_max_x = child_rect.max.x
             else:
                 best_child_node = child_data.get_child_node(highest_child_index)
 
@@ -755,6 +761,9 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
                 group_rect = pixel_rect.transform_rect(group_rect)
                 group_rect = expand_rect(group_rect)
                 draw_node(best_child_node, group_rect, cull_rect, min_height, painter)
+
+                if greatest_child_max_x < group_rect.max.x:
+                    greatest_child_max_x = group_rect.max.x
 
             probability_start = child_data.get_child_end(i)
             probability_accumulative = 0.0
@@ -784,9 +793,19 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
             draw_background(painter, group_q_rect)
             draw_loading_text(painter, group_q_rect, group_label_string)
 
+        if greatest_child_max_x < pixel_rect.max.x:
+            greatest_child_max_x = pixel_rect.max.x
+
     # We draw the text after the rectangles (including children rectangles),
     # so that it is on top of them.
-    draw_text(painter, q_rect, label_string)
+    # To draw the text, we find the empty space between the parent's rectangle and the largest child rectangle.
+    # Then we draw the text centered within that space.
+    text_rect = Rect(
+        vec2(greatest_child_max_x, original_pixel_rect.min.y),
+        original_pixel_rect.max
+    )
+    q_text_rect = rect_to_QRect(transform_rect_for_drawing(text_rect, cull_rect)).toRect()
+    draw_text(painter, q_text_rect, label_string)
 
 
 # @timed("draw_view")

@@ -215,6 +215,8 @@ class Node:
 
             self.parent_node = parent_node
 
+            self._highest_child: Node | None = None
+
         @property
         def children(self):
             if self is None:
@@ -294,6 +296,23 @@ class Node:
             )
             self.child_nodes[index] = child_node
             return child_node
+
+        @property
+        def highest_child(self):
+            if self._highest_child is not None:
+                return self._highest_child
+
+            highest_index = 0
+            highest_prob = self.probabilities[0]
+
+            for i in range(1, len(self.probabilities), 1):
+                prob = self.probabilities[i]
+                if highest_prob < prob:
+                    highest_index = i
+                    highest_prob = prob
+
+            self._highest_child = self.get_child_node(highest_index)
+            return self._highest_child
 
     label_size_pixels: vec2 | None = None
     label_string: str | None = None
@@ -608,7 +627,7 @@ def get_drawing_info(pixel_rect: Rect, cull_rect: Rect, text: str, min_height: i
     clamped_size = clamped_rect.size
 
     # Too small?
-    if clamped_size.x < size.x or clamped_size.y < min_height:
+    if clamped_size.x < size.x:  # or clamped_size.y < min_height:  # vertical size limits are enforced elsewhere.
         return None
 
     return rect_to_QRect(transform_rect_for_drawing(clamped_rect, cull_rect)).toRect(), string_to_write, size
@@ -707,11 +726,22 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
     # Find the visible vertical span (range 0 to 1) of the node,
     # which we will use to figure out what children to draw.
     pixel_rect_height = pixel_rect.max.y - pixel_rect.min.y
+
+    # Prevent division by zero in case we didn't catch it earlier.
+    if pixel_rect_height <= 0:
+        return False
+
     start_range = (cull_rect.min.y - pixel_rect.min.y) / pixel_rect_height
     end_range = (cull_rect.max.y - pixel_rect.min.y) / pixel_rect_height
     start_range = max(0.0, min(1.0, start_range))
     end_range = max(0.0, min(1.0, end_range))
     visible_range = (start_range, end_range)
+
+    # Before we get the children data,
+    # we need to update the node's priority,
+    # which is based on how recently it the last draw attempt was,
+    # and the size of the node when it was last drawn.
+    node.update_visibility_prioritization(get_view_clamped_rect(original_pixel_rect, cull_rect, 0))
 
     child_data = node.get_children_data()
     greatest_child_max_x = pixel_rect.min.x
@@ -725,69 +755,84 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
         # The minimum accumulative probability required to draw a child/group of children.
         probability_required = min_height / pixel_rect_height
 
-        # Since many of the children will likely be too small to draw,
-        # we will draw a rectangle for "groups" of children whose heights sum to the minimum height,
-        # and draw the highest scoring child to represent the group using the group rect.
-        # This process may only yield a single child,
-        # in which case we will draw it directly and not use the group rect.
+        # If we only have space to draw one child,
+        # just pick the highest probability one and draw it
+        # using the entire space available.
+        if probability_required >= 0.5:
+            child = child_data.highest_child
+            if draw_node(child, pixel_rect, cull_rect, min_height, painter):
+                if greatest_child_max_x < pixel_rect.max.x:
+                    greatest_child_max_x = pixel_rect.max.x
 
-        probability_start = child_data.get_child_start(start_index)
-        probability_accumulative = 0.0
-        highest_child_index = -1
-        highest_child_probability = -1e10
-        child_count = 0
-        for i in range(start_index, end_index + 1):
-            child_probability = child_data.get_child_probability(i)
-            probability_accumulative += child_probability
+        else:
+            # Since many of the children will likely be too small to draw,
+            # we will draw a rectangle for "groups" of children whose heights sum to the minimum height,
+            # and draw the highest scoring child to represent the group using the group rect.
+            # This process may only yield a single child,
+            # in which case we will draw it directly and not use the group rect.
 
-            if child_probability > highest_child_probability:
-                highest_child_index = i
-                highest_child_probability = child_probability
-
-            child_count += 1
-
-            if probability_accumulative < probability_required:
-                # We don't have enough probability to draw this child.
-
-                # BUT, if the next child doesn't exist, we should draw it despite it not being large enough.
-                # ALSO, Check if the next child is large enough to draw on its own.
-                # In this case we should draw this group despite it not being large enough as well,
-                # as to avoid interfering with the next child.
-                if (i + 1) <= end_index and child_data.get_child_probability(i + 1) < probability_required:
-                    continue
-
-            if child_count == 1:
-                # Draw the child directly
-                # This call will create the children of the node, if they don't exist yet.
-                child = child_data.get_child_node(i)
-                child_rect = pixel_rect.transform_rect(child.local_rect)
-                child_rect = expand_rect(child_rect)
-                if draw_node(child, child_rect, cull_rect, min_height, painter):
-                    if greatest_child_max_x < child_rect.max.x:
-                        greatest_child_max_x = child_rect.max.x
-            else:
-                best_child_node = child_data.get_child_node(highest_child_index)
-
-                # Draw a rectangle for the group of children
-                group_rect = range_to_local_rect(probability_start, probability_start + probability_accumulative)
-                group_rect = pixel_rect.transform_rect(group_rect)
-                group_rect = expand_rect(group_rect)
-                if draw_node(best_child_node, group_rect, cull_rect, min_height, painter):
-                    if greatest_child_max_x < group_rect.max.x:
-                        greatest_child_max_x = group_rect.max.x
-
-            probability_start = child_data.get_child_end(i)
+            probability_start = child_data.get_child_start(start_index)
             probability_accumulative = 0.0
             highest_child_index = -1
             highest_child_probability = -1e10
             child_count = 0
+            for i in range(start_index, end_index + 1):
+                child_probability = child_data.get_child_probability(i)
+                probability_accumulative += child_probability
+
+                if child_probability > highest_child_probability:
+                    highest_child_index = i
+                    highest_child_probability = child_probability
+
+                child_count += 1
+
+                if probability_accumulative < probability_required:
+                    # We don't have enough probability to draw this child.
+
+                    # Check if the next child is large enough to draw on its own.
+                    # In this case we should discard this group.
+                    if (i + 1) <= end_index and child_data.get_child_probability(i + 1) >= probability_required:
+                        # Start new group.
+                        probability_start = child_data.get_child_end(i)
+                        probability_accumulative = 0.0
+                        highest_child_index = -1
+                        highest_child_probability = -1e10
+                        child_count = 0
+                        continue
+
+                    # Move onto the next child and accumulate further.
+                    continue
+
+                if child_count == 1:
+                    # Draw the child directly
+                    # This call will create the children of the node, if they don't exist yet.
+                    child = child_data.get_child_node(i)
+                    child_rect = pixel_rect.transform_rect(child.local_rect)
+                    child_rect = expand_rect(child_rect)
+                    if draw_node(child, child_rect, cull_rect, min_height, painter):
+                        if greatest_child_max_x < child_rect.max.x:
+                            greatest_child_max_x = child_rect.max.x
+                else:
+                    best_child_node = child_data.get_child_node(highest_child_index)
+
+                    # Draw a rectangle for the group of children
+                    group_rect = range_to_local_rect(probability_start, probability_start + probability_accumulative)
+                    group_rect = pixel_rect.transform_rect(group_rect)
+
+                    group_rect = expand_rect(group_rect)
+                    if draw_node(best_child_node, group_rect, cull_rect, min_height, painter):
+                        if greatest_child_max_x < group_rect.max.x:
+                            greatest_child_max_x = group_rect.max.x
+
+                # Start new group.
+                probability_start = child_data.get_child_end(i)
+                probability_accumulative = 0.0
+                highest_child_index = -1
+                highest_child_probability = -1e10
+                child_count = 0
 
     # Otherwise, the children data is not available yet.
     else:
-        # Update the node's priority, which is based on how recently it the last draw attempt was,
-        # and the size of the node when it was last drawn.
-        node.update_visibility_prioritization(pixel_rect)
-
         # Draw a loading indicator.
         global loading_gizmo_frames
 

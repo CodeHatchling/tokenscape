@@ -479,7 +479,6 @@ def transform_rect_for_drawing(pixel_rect: Rect, cull_rect: Rect) -> Rect:
     return pixel_rect
 
 
-cache: dict[str, tuple[vec2, str]] = {}
 
 
 # This is a mapping of invisible characters (or characters that are not visible in isolation) to visible characters,
@@ -557,6 +556,43 @@ def replace_whitespace_only_labels(label: str) -> str:
     return replaced_string
 
 
+cache: dict[str, tuple[str, vec2]] = {}
+
+
+def get_label_info(text: str, painter: QPainter) -> tuple[str, vec2]:
+    global cache
+
+    if text in cache:
+        return cache[text]
+
+    metrics = painter.fontMetrics()
+
+    label = text
+    label = replace_whitespace_only_labels(label)
+
+    size_qsize = metrics.size(0, text)
+
+    # If the string is too long, truncate it. Also, what the hell is this comment?
+    if size_qsize.width() > 100:
+        # Truncate the string.
+        label = label[:20] + "..."
+
+    size_qsize = metrics.size(0, label)
+    size = QSize_to_vec2(size_qsize)
+    result = (label, size)
+    cache[text] = result
+
+    return result
+
+def get_view_clamped_rect(rect: Rect, cull_rect: Rect, label_width: float):
+    # Clamp drawn rect to cull rect while leaving room for the label offscreen.
+    clamper_rect = Rect(
+        vec2(cull_rect.min.x, cull_rect.min.y),
+        vec2(cull_rect.max.x + label_width, cull_rect.max.y)
+    )
+    return clamper_rect.clamp_rect(rect)
+
+
 def get_drawing_info(pixel_rect: Rect, cull_rect: Rect, text: str, min_height: int, painter: QPainter) \
         -> tuple[QRect, str, vec2] | None:
     global cache
@@ -565,33 +601,10 @@ def get_drawing_info(pixel_rect: Rect, cull_rect: Rect, text: str, min_height: i
     if not cull_rect.overlaps(pixel_rect):
         return None
 
-    if text in cache:
-        size = cache[text][0]
-        string_to_write = cache[text][1]
-    else:
-        metrics = painter.fontMetrics()
-        string_to_write = text
-
-        # print_unique_chars(string_to_write)
-        string_to_write = replace_whitespace_only_labels(string_to_write)
-
-        size_qsize = metrics.size(0, text)
-
-        # If the string is too long, truncate it. Also, what the hell is this comment?
-        if size_qsize.width() > 100:
-            # Truncate the string.
-            string_to_write = string_to_write[:20] + "..."
-
-        size_qsize = metrics.size(0, string_to_write)
-        size = QSize_to_vec2(size_qsize) + vec2(10, 10)
-        cache[text] = (size, string_to_write)
+    string_to_write, size = get_label_info(text, painter)
 
     # Clamp drawn rect to cull rect while leaving room for the label offscreen.
-    clamper_rect = Rect(
-        vec2(cull_rect.min.x, cull_rect.min.y),
-        vec2(cull_rect.max.x + size.x, cull_rect.max.y)
-    )
-    clamped_rect = clamper_rect.clamp_rect(pixel_rect)
+    clamped_rect = get_view_clamped_rect(pixel_rect, cull_rect, size.x)
     clamped_size = clamped_rect.size
 
     # Too small?
@@ -603,15 +616,15 @@ def get_drawing_info(pixel_rect: Rect, cull_rect: Rect, text: str, min_height: i
 
 def draw_background(painter: QPainter, q_rect: QRect):
     painter.setOpacity(0.25)
-    painter.setPen(QPen(drawing_style.standardPalette().midlight().color(), 1))
+    painter.setPen(QPen(drawing_style.standardPalette().accent().color(), 1))
     painter.drawLine(QPoint(q_rect.x(), q_rect.y()), QPoint(q_rect.x(), q_rect.y() + q_rect.height()))
-    # painter.setBrush(drawing_style.standardPalette().shadow().color())
-    painter.fillRect(q_rect, drawing_style.standardPalette().shadow().color())
+
+    painter.fillRect(q_rect, drawing_style.standardPalette().window())
 
 
 def draw_text(painter: QPainter, q_rect: QRect, label: str):
     painter.setOpacity(1)
-    painter.setPen(QPen(drawing_style.standardPalette().mid().color(), 1))
+    painter.setPen(QPen(drawing_style.standardPalette().windowText().color(), 1))
     painter.drawText(q_rect,
                      Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignHCenter,
                      label)
@@ -619,7 +632,7 @@ def draw_text(painter: QPainter, q_rect: QRect, label: str):
 
 def draw_loading_text(painter: QPainter, q_rect: QRect, label: str):
     painter.setOpacity(0.5)
-    painter.setPen(QPen(drawing_style.standardPalette().mid().color(), 1))
+    painter.setPen(QPen(drawing_style.standardPalette().windowText().color(), 1))
 
     font = painter.font()
 
@@ -802,6 +815,7 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
         vec2(greatest_child_max_x, original_pixel_rect.min.y),
         original_pixel_rect.max
     )
+    text_rect = get_view_clamped_rect(text_rect, cull_rect, label_size.x)
     q_text_rect = rect_to_QRect(transform_rect_for_drawing(text_rect, cull_rect)).toRect()
     draw_text(painter, q_text_rect, label_string)
 
@@ -1054,7 +1068,7 @@ if __name__ == "__main__":
     # Set the application style
     # Here are all the app styles available in Qt:
     # ['Breeze', 'Oxygen', 'QtCurve', 'Windows', 'Fusion']
-    app.setStyle("Breeze")
+    # app.setStyle("Breeze")
 
     # Create and open text file for the decoded output with a unique name.
     unique_name_suffix = time.strftime("%Y%m%d-%H%M%S")

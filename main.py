@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QLabel, QFrame,
     QScrollArea, QMenu
 )
-from PyQt6.QtGui import QPainter, QPen, QTextCursor
+from PyQt6.QtGui import QPainter, QPen, QTextCursor, QColor
 from PyQt6.QtCore import (
     Qt, QRectF, QTimer,
     QPoint, QPointF, QSize,
@@ -633,12 +633,16 @@ def get_drawing_info(pixel_rect: Rect, cull_rect: Rect, text: str, min_height: i
     return rect_to_QRect(transform_rect_for_drawing(clamped_rect, cull_rect)).toRect(), string_to_write, size
 
 
+debug_color: QColor | None = None
+
+
 def draw_background(painter: QPainter, q_rect: QRect):
-    painter.setOpacity(0.25)
+    global debug_color
+    painter.setOpacity(0.25 if debug_color is None else 1.0)
     painter.setPen(QPen(drawing_style.standardPalette().accent().color(), 1))
     painter.drawLine(QPoint(q_rect.x(), q_rect.y()), QPoint(q_rect.x(), q_rect.y() + q_rect.height()))
 
-    painter.fillRect(q_rect, drawing_style.standardPalette().window())
+    painter.fillRect(q_rect, drawing_style.standardPalette().window() if debug_color is None else debug_color)
 
 
 def draw_text(painter: QPainter, q_rect: QRect, label: str):
@@ -687,6 +691,8 @@ def get_loading_text(frames, speed=10) -> str:
 
 
 def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, painter: QPainter) -> bool:
+    global debug_color
+
     def expand_rect(_child_rect: Rect) -> Rect:
         # As the rect's "base" size grows, we will smoothly interpolate from the expanded size to the base size.
         # This is to prevent sudden jumps when the view is reparented, by restricting the influence of scaling
@@ -758,7 +764,7 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
         # If we only have space to draw one child,
         # just pick the highest probability one and draw it
         # using the entire space available.
-        if probability_required >= 0.5:
+        if False:  # probability_required >= 0.5:
             child = child_data.highest_child
             if draw_node(child, pixel_rect, cull_rect, min_height, painter):
                 if greatest_child_max_x < pixel_rect.max.x:
@@ -771,7 +777,178 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
             # This process may only yield a single child,
             # in which case we will draw it directly and not use the group rect.
 
-            probability_start = child_data.get_child_start(start_index)
+            def _draw(_child_index: int, _start: float, _accum: float):
+                nonlocal greatest_child_max_x
+                _best_child_node = child_data.get_child_node(_child_index)
+                _group_rect = range_to_local_rect(_start,
+                                                  _start + _accum)
+                _group_rect = pixel_rect.transform_rect(_group_rect)
+
+                _group_rect = expand_rect(_group_rect)
+                if draw_node(_best_child_node, _group_rect, cull_rect, min_height, painter):
+                    if greatest_child_max_x < _group_rect.max.x:
+                        greatest_child_max_x = _group_rect.max.x
+
+            a_start_prob = child_data.get_child_start(start_index)
+            a_accum_prob = 0.0
+            a_child_count = 0
+            a_highest_index = -1
+            a_highest_prob = -1e10
+
+            has_b = False
+            b_start_prob = 0.0
+            b_accum_prob = 0.0
+            b_child_count = 0
+            b_highest_index = -1
+            b_highest_prob = -1e10
+
+            def end_group():
+                global debug_color
+                nonlocal a_start_prob, a_accum_prob, a_child_count, a_highest_index, a_highest_prob
+                nonlocal b_start_prob, b_accum_prob, b_child_count, b_highest_index, b_highest_prob
+                nonlocal has_b
+
+                if a_accum_prob >= probability_required and a_child_count == 1:
+                    if has_b:
+                        if b_accum_prob >= probability_required:
+                            debug_color = QColor(255, 255, 255)
+                            _draw(b_highest_index, b_start_prob, b_accum_prob)
+                            debug_color = None
+
+                    debug_color = QColor(0, 255, 255)
+                    _draw(a_highest_index, a_start_prob, a_accum_prob)
+                    debug_color = None
+
+                else:
+                    _merged = False
+                    if has_b:
+                        if b_accum_prob < probability_required:
+                            # Merge the groups
+                            a_accum_prob += b_accum_prob
+                            a_child_count += b_child_count
+                            if a_highest_prob < b_highest_prob:
+                                a_highest_prob = b_highest_prob
+                                a_highest_index = b_highest_index
+
+                            _merged = True
+                        else:
+                            debug_color = QColor(0, 0, 255)
+                            _draw(b_highest_index, b_start_prob, b_accum_prob)
+                            debug_color = None
+
+                    if a_accum_prob >= probability_required:
+                        if _merged:
+                            debug_color = QColor(127, 127, 0)
+                        else:
+                            debug_color = QColor(255, 127, 0)
+                        _draw(a_highest_index, a_start_prob, a_accum_prob)
+                        debug_color = None
+
+                # Discard groups, start over.
+                a_start_prob = child_data.get_child_end(i)
+                a_accum_prob = 0.0
+                a_child_count = 0
+                a_highest_index = -1
+                a_highest_prob = -1e10
+
+                has_b = False
+                b_start_prob = 0.0
+                b_accum_prob = 0.0
+                b_child_count = 0
+                b_highest_index = -1
+                b_highest_prob = -1e10
+
+            for i in range(start_index, end_index + 1):
+                child_prob = child_data.get_child_probability(i)
+
+                if has_b:
+                    b_accum_prob += child_prob
+                    if b_highest_index == -1 or child_prob > b_highest_prob:
+                        b_highest_index = i
+                        b_highest_prob = child_prob
+                    b_child_count += 1
+
+                    if b_accum_prob < probability_required:
+                        # We don't have enough probability to draw group B.
+                        # Check if the next child is large enough to draw on its own.
+                        # In this case we should try drawing it and starting a new group.
+                        if (i + 1) <= end_index and child_data.get_child_probability(i + 1) >= probability_required:
+                            end_group()
+                            continue
+                        else:
+                            # Otherwise, move onto the next child and accumulate further.
+                            continue
+                    else:
+                        # Draw group A
+                        debug_color = QColor(0, 255, 0)
+                        _draw(a_highest_index, a_start_prob, a_accum_prob)
+                        debug_color = None
+
+                        # Migrate B to A.
+                        a_start_prob = b_start_prob
+                        a_accum_prob = b_accum_prob
+                        a_child_count = b_child_count
+                        a_highest_index = b_highest_index
+                        a_highest_prob = b_highest_prob
+
+                        has_b = False
+                        b_start_prob = 0.0
+                        b_accum_prob = 0.0
+                        b_child_count = 0
+                        b_highest_index = -1
+                        b_highest_prob = -1e10
+
+                        # Move onto the next child and accumulate further.
+                        continue
+                else:
+                    a_accum_prob += child_prob
+                    if a_highest_index == -1 or child_prob > a_highest_prob:
+                        a_highest_index = i
+                        a_highest_prob = child_prob
+                    a_child_count += 1
+
+                    if a_accum_prob < probability_required:
+                        # We don't have enough probability to draw group A.
+
+                        # Check if the next child is large enough to draw on its own.
+                        # In this case we should discard the groups.
+                        if (i + 1) <= end_index and child_data.get_child_probability(i + 1) >= probability_required:
+                            # Discard group A, start over.
+                            a_start_prob = child_data.get_child_end(i)
+                            a_accum_prob = 0.0
+                            a_child_count = 0
+                            a_highest_index = -1
+                            a_highest_prob = -1e10
+
+                            has_b = False
+                            b_start_prob = 0.0
+                            b_accum_prob = 0.0
+                            b_child_count = 0
+                            b_highest_index = -1
+                            b_highest_prob = -1e10
+                            continue
+
+                        else:
+                            # Otherwise, move onto the next child and accumulate further.
+                            continue
+                    else:
+                        if a_child_count == 1:
+                            end_group()
+                            continue
+                        else:
+                            # Partition A is large enough to be drawn,
+                            # start building up partition B.
+                            has_b = True
+                            b_start_prob = child_data.get_child_end(i)
+                            b_accum_prob = 0.0
+                            b_child_count = 0
+                            b_highest_index = -1
+                            b_highest_prob = -1e10
+                            continue
+
+            end_group()
+
+            '''probability_start = child_data.get_child_start(start_index)
             probability_accumulative = 0.0
             highest_child_index = -1
             highest_child_probability = -1e10
@@ -829,10 +1006,11 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
                 probability_accumulative = 0.0
                 highest_child_index = -1
                 highest_child_probability = -1e10
-                child_count = 0
+                child_count = 0'''
 
     # Otherwise, the children data is not available yet.
     else:
+        debug_color = None
         # Draw a loading indicator.
         global loading_gizmo_frames
 
@@ -852,6 +1030,7 @@ def draw_node(node: Node, pixel_rect: Rect, cull_rect: Rect, min_height: int, pa
         if greatest_child_max_x < pixel_rect.max.x:
             greatest_child_max_x = pixel_rect.max.x
 
+    debug_color = None
     # We draw the text after the rectangles (including children rectangles),
     # so that it is on top of them.
     # To draw the text, we find the empty space between the parent's rectangle and the largest child rectangle.

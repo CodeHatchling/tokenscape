@@ -34,12 +34,17 @@ class LLMThread:
                         highest_job = job
                         highest_priority = priority
                     else:
+                        # If one was requested more recently...
                         if highest_priority[0] < priority[0]:
+                            # ...do it first.
                             highest_job = job
                             highest_priority = priority
-                        elif highest_priority[1] < priority[1]:
-                            highest_job = job
-                            highest_priority = priority
+                        elif highest_priority[0] == priority[0]:
+                            # Otherwise, if they are just as recent...
+                            if highest_priority[1] < priority[1]:
+                                # Do the one that has a larger visible area first.
+                                highest_job = job
+                                highest_priority = priority
 
                 # Remove future from the hashset
                 if highest_job is not None:

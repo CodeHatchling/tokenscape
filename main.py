@@ -1054,15 +1054,26 @@ class Canvas(QWidget):
 
         # Set up the view velocity and mouse possession
         self.view_velocity: vec2 = vec2(0, 0)
-        self.target_view_velocity: vec2 = vec2(0, 0)
         self.mouse_possessed = False
         self.last_mouse_pos = None
         self.target_view_velocity_mouse: vec2 = vec2(0, 0)
 
+        self.key_up_state: bool = False
+        self.key_right_state: bool = False
+        self.key_down_state: bool = False
+        self.key_left_state: bool = False
+
     def update_all(self):
         try:
             dt = 16/1000
-            self.view_velocity = lerp(self.target_view_velocity + self.target_view_velocity_mouse,
+
+            # Handle keyboard input for view velocity
+            target_view_velocity_keyboard = vec2(
+                (1 if self.key_left_state else 0) - (1 if self.key_right_state else 0),
+                (1 if self.key_up_state else 0) - (1 if self.key_down_state else 0)
+            )
+
+            self.view_velocity = lerp(target_view_velocity_keyboard + self.target_view_velocity_mouse,
                                       self.view_velocity,
                                       0.01**dt)
             self.view.position = integrated_move(self.view.position, self.view_velocity * vec2(1, -1), dt)
@@ -1115,37 +1126,25 @@ class Canvas(QWidget):
             traceback.print_exc()
 
     # ----------------- Keyboard navigation -----------------
+    def update_key_state(self, key: Qt.Key, state: bool):
+        if key == Qt.Key.Key_Left:
+            self.key_left_state = state
+        elif key == Qt.Key.Key_Right:
+            self.key_right_state = state
+        elif key == Qt.Key.Key_Up:
+            self.key_up_state = state
+        elif key == Qt.Key.Key_Down:
+            self.key_down_state = state
+
     def keyPressEvent(self, event):
         try:
-            key = event.key()
-            move_step = 1
-
-            if key == Qt.Key.Key_Left:
-                self.target_view_velocity.x += move_step
-            elif key == Qt.Key.Key_Right:
-                self.target_view_velocity.x -= move_step
-
-            if key == Qt.Key.Key_Up:
-                self.target_view_velocity.y += move_step
-            elif key == Qt.Key.Key_Down:
-                self.target_view_velocity.y -= move_step
+            self.update_key_state(event.key(), True)
         except Exception:
             traceback.print_exc()
 
     def keyReleaseEvent(self, event):
         try:
-            key = event.key()
-            move_step = -1
-
-            if key == Qt.Key.Key_Left:
-                self.target_view_velocity.x += move_step
-            elif key == Qt.Key.Key_Right:
-                self.target_view_velocity.x -= move_step
-
-            if key == Qt.Key.Key_Up:
-                self.target_view_velocity.y += move_step
-            elif key == Qt.Key.Key_Down:
-                self.target_view_velocity.y -= move_step
+            self.update_key_state(event.key(), False)
         except Exception:
             traceback.print_exc()
 

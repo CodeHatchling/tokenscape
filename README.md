@@ -35,6 +35,7 @@ This approach enables a more collaborative means of leveraging LLMs' capabilitie
 3. Text Inpainting: By selecting a region of text, the user can navigate a tree of continuations conditioned on seamlessly connecting with the following text.
 4. Sampling Settings: Expose the top-N parameter (currently set to 500), use techniques to filter unwanted continuations, such as those with repetitions, etc.
 5. Keyboard-Only Navigation: Provide a way to quickly select continuations without leaving the keyboard, e.g. using [Tab] or [Control]+[WASD] to select nodes. More ideas welcome.
+6. Spiritual Successor to Dasher: While this project is mainly intended as a creative tool, it could be expanded and adapted to assist users with physical limitations, such as those with motor impairments.
 
 **Known Issues**
 

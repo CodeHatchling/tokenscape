@@ -10,7 +10,7 @@ This approach enables a more collaborative means of leveraging LLMs' capabilitie
 1. **Brainstorm**: Quickly explore multiple writing directions and have a pool of ideas to consider. Uncover unexpected connections and wordplay opportunities that might have been missed otherwise.
 2. **Broaden Writing Styles**: Expand their writing repertoire by sampling from diverse linguistic patterns and sentence structures, which can help refine their own writing style.
 3. **Break Writer's Block**: When faced with a creative impasse, the model will always have more ideas to offer, which can help spark new inspiration or help push through a difficult or uninteresting passage.
-4. **Focus**: Apply their creative energy the most important creative decisions, while easing the mental burden of less impactful yet still necessary writing routines.
+4. **Focus**: Apply their creative energy on the most important decisions, while easing the mental burden of less impactful yet still necessary writing routines.
 5. **Stay in Control**: The model remains a tool, not a replacement. Users retain full agency over the writing process, and can engage with the model's suggestions to whatever degree they see fit, explore paths that diverge from the model's predictions, or manually write and edit the text independently.
 
 **Key Features**
